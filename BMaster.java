@@ -26,8 +26,8 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 	
 	private int timeout;
 	
-	private final int scaleOutThreshold = 1;
-	private final int scaleInThreshold = 1;
+	private double scaleOutThreshold = 1;
+	private double scaleInThreshold = 1;
 	
 	private FrontMasterIf fmif = null;
 	
@@ -48,8 +48,11 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 		
 		if (serverType == Server.BROWSESERVER) {
 			timeout = 1000;
+			scaleOutThreshold = 2;
+			scaleInThreshold = 0.5;
 		} else {
 			timeout = 2000;
+			scaleOutThreshold = 3;
 		}
 		
 		// running checking scale out in another thread
@@ -78,7 +81,9 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 	}
 	
 	public synchronized void dropQueue() {
-		while (requestQueue.size() > 0) {
+		int size = requestQueue.size();
+		size /= 2;
+		while (size-- > 0) {
 			RequestPacket rp = requestQueue.get(0);
 			System.out.println("Ready to drop " + requestQueue.size() + " request");
 			if (rp.uid == 1) {
@@ -123,15 +128,15 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 	 * Scale out when there happens that it meets requirement for two consecutive times
 	 */
 	public boolean toScaleOut() {
-		int tryScale = 2;
+		int tryScale = 1;
 		while (tryScale-- > 0) {
 			if (requestQueue.size() >= scaleOutThreshold * (BServerList.size() + 1)) {
-				try {
+				/*try {
 					Thread.sleep(50);
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
-				}
+				}*/
 			} else {
 				return false;
 			}
@@ -148,9 +153,9 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 		
 		int tryScale = 3;
 		while (tryScale-- > 0) {
-			if (requestQueue.size() == 0) {//< scaleInThreshold * (BServerList.size() + 1)) {
+			if (requestQueue.size() < scaleInThreshold * (BServerList.size() + 1)) {
 				try {
-					Thread.sleep(2500);
+					Thread.sleep(4000);
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();

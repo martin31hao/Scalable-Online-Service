@@ -65,18 +65,19 @@ public class BServer extends UnicastRemoteObject implements BServerIf{
 			} catch (RemoteException e) {
 				// TODO Auto-generated catch block
 				try {
-					Thread.sleep(200);
+					Thread.sleep(50);
 				} catch (InterruptedException e1) {
 					// TODO Auto-generated catch block
 					e1.printStackTrace();
 				}
-				System.out.println("VM " + uid + " get request failed.");
+				//System.out.println("VM " + uid + " get request failed.");
 				continue;
 				//e.printStackTrace();
 			}
 			if (nowReq == null) {
+				System.out.println("VM " + uid + " get null request.");
 				try {
-					Thread.sleep(200);
+					Thread.sleep(2000);
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
@@ -84,6 +85,7 @@ public class BServer extends UnicastRemoteObject implements BServerIf{
 				continue;
 			}
 				
+			System.out.println("VM " + uid + " starting process.");
 			SL.processRequest(nowReq);
 		}
 		System.out.println("VM " + uid + " Killed");

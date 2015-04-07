@@ -36,6 +36,10 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 	private String addr;
 	private int port;
 	
+	private long timeNow = -1;
+	private long timeLast = -1;
+	private long timeMean = -1;
+	
 	public BMaster(ServerLib SL, String addr, int port, int serverType) 
 		throws RemoteException {
 		this.SL = SL;
@@ -48,15 +52,16 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 		
 		if (serverType == Server.BROWSESERVER) {
 			timeout = 1000;
-			scaleOutThreshold = 2;
-			scaleInThreshold = 0.5;
+			scaleOutThreshold = 1.5;
+			scaleInThreshold = 1;
 		} else {
 			timeout = 2000;
 			scaleOutThreshold = 3;
 		}
 		
 		// running checking scale out in another thread
-		new Thread(new CheckScale()).start();
+		new Thread(new CheckScaleOut()).start();
+		//new Thread(new CheckScaleIn()).start();
 	}
 	
 	/*
@@ -80,9 +85,11 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 		}
 	}
 	
-	public synchronized void dropQueue() {
+	public synchronized void dropQueue(boolean half) {
 		int size = requestQueue.size();
-		size /= 2;
+		if (size <= 4)	return;
+		if (half)
+			size /= 2;
 		while (size-- > 0) {
 			RequestPacket rp = requestQueue.get(0);
 			System.out.println("Ready to drop " + requestQueue.size() + " request");
@@ -116,9 +123,16 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 	public void scaleOut() {
 		System.out.println("Request size: " + requestQueue.size());
 		if (toScaleOut()) {
-			startBServer();
-			dropQueue();
+			int scaleSize = Math.min(1, requestQueue.size() / 2);
+			startBServer(scaleSize);//Math.max(2, scaleSize));
+			dropQueue(true);
 		}
+		//if (BServerList.size() > 4 && requestQueue.size() > Math.max(2, this.BServerList.size() / 3)) {
+		//	dropQueue(false);
+		//}
+	}
+	
+	public void scaleIn() {
 		if (toScaleIn()) {
 			shutBServer();
 		}
@@ -128,9 +142,10 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 	 * Scale out when there happens that it meets requirement for two consecutive times
 	 */
 	public boolean toScaleOut() {
-		int tryScale = 1;
+		int tryScale = 2;
 		while (tryScale-- > 0) {
-			if (requestQueue.size() >= scaleOutThreshold * (BServerList.size() + 1)) {
+			double thresh = scaleOutThreshold * (BServerList.size() + 1);
+			if (requestQueue.size() >= Math.min(4, thresh)) {//Math.max(2, thresh - 15)) {
 				/*try {
 					Thread.sleep(50);
 				} catch (InterruptedException e) {
@@ -170,13 +185,15 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 	/*
 	 * Start front server when needed
 	 */
-	public synchronized void startBServer() {
-		SL.startVM();
-		try {
-			fmif._addServer(serverType);
-		} catch (RemoteException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
+	public synchronized void startBServer(int num) {
+		for (int i = 0; i < num; i++) {
+			SL.startVM();
+			try {
+				fmif._addServer(serverType);
+			} catch (RemoteException e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
 		}
 	}
 	
@@ -215,7 +232,7 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 		if (requestQueue.size() > 0) {
 			return requestQueue.poll().r;
 		}
-		return  null;
+		return null;
 	}
 	
 	/*
@@ -223,7 +240,20 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 	 */
 	@Override
 	public synchronized void _sendRequest(RequestPacket rp) throws RemoteException {
+		// record time spec of first coming ranges, and decide how many to scale 
 		requestQueue.add(rp);
+		timeNow = System.currentTimeMillis();
+		if (timeLast == -1) {
+			timeLast = timeNow;
+			return;
+		}
+		if (timeMean == -1) {
+			timeMean = timeNow - timeLast;
+			timeLast = timeNow;
+			return;
+		}
+		timeMean = (timeMean + (timeNow - timeLast)) / 2;
+		timeLast = timeNow;
 	}
 
 	/*
@@ -249,23 +279,54 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 	    }
 	}
 	
-	public class CheckScale implements Runnable{
+	public class CheckScaleOut implements Runnable{
+
+		@Override
+		public void run() {
+			// TODO Auto-generated method stub
+			int cnt = 0;
+			while (true) {
+				try {
+					if (cnt > 10) {
+					//if (timeMean == -1)
+						Thread.sleep(300);
+					//else {
+						
+					//	break;
+					//}
+				//		scaleOutThreshold = 1.5;
+					}
+					else
+						Thread.sleep(50);
+				} catch (InterruptedException e) {
+					// TODO Auto-generated catch block
+					e.printStackTrace();
+				}
+				scaleOut();
+				cnt++;
+			}
+		}
+		
+	}
+	
+	public class CheckScaleIn implements Runnable{
 
 		@Override
 		public void run() {
 			// TODO Auto-generated method stub
 			while (true) {
 				try {
-					Thread.sleep(1000);
+					Thread.sleep(2000);
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
 				}
-				scaleOut();
+				scaleIn();
 			}
 		}
 		
 	}
+	
 	
 	// Get front master instance
 	public FrontMasterIf getFrontMasterInstance(String addr, int port) {

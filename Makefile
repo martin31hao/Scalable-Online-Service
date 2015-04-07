@@ -1,4 +1,4 @@
-all: Server.class
+all: Server.class BMaster.class BMasterIf.class BServer.class BServerIf.class FrontMaster.class FrontMasterIf.class FrontServer.class FrontServerIf.class ServerRole.class
 
 %.class: %.java
 	javac $<

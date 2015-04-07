@@ -64,11 +64,19 @@ public class BServer extends UnicastRemoteObject implements BServerIf{
 				nowReq = BM._getRequest();
 			} catch (RemoteException e) {
 				// TODO Auto-generated catch block
-				e.printStackTrace();
+				try {
+					Thread.sleep(200);
+				} catch (InterruptedException e1) {
+					// TODO Auto-generated catch block
+					e1.printStackTrace();
+				}
+				System.out.println("VM " + uid + " get request failed.");
+				continue;
+				//e.printStackTrace();
 			}
 			if (nowReq == null) {
 				try {
-					Thread.sleep(500);
+					Thread.sleep(200);
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();

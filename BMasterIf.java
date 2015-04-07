@@ -3,7 +3,7 @@ import java.rmi.RemoteException;
 
 public interface BMasterIf extends Remote {
 	// for FrontMaster to send request to BMaster's queue
-	public void _sendRequest(Cloud.FrontEndOps.Request r) throws RemoteException;
+	public void _sendRequest(RequestPacket rp) throws RemoteException;
 	
 	// for BServer to get request from its request queue
 	public Cloud.FrontEndOps.Request _getRequest() throws RemoteException;

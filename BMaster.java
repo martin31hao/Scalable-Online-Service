@@ -21,25 +21,30 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 	 */
 	private static final long serialVersionUID = -2171551605351261999L;
 	private ServerLib SL;
-	private LinkedList<Cloud.FrontEndOps.Request> requestQueue;
+	private LinkedList<RequestPacket> requestQueue;
 	private LinkedList<BServerIf> BServerList;
 	
 	private int timeout;
 	
-	private final int scaleOutThreshold = 2;
+	private final int scaleOutThreshold = 1;
 	private final int scaleInThreshold = 1;
 	
 	private FrontMasterIf fmif = null;
 	
 	private int serverType;
+
+	private String addr;
+	private int port;
 	
 	public BMaster(ServerLib SL, String addr, int port, int serverType) 
 		throws RemoteException {
 		this.SL = SL;
-		requestQueue = new LinkedList<Cloud.FrontEndOps.Request>();
+		requestQueue = new LinkedList<RequestPacket>();
 		BServerList = new LinkedList<BServerIf>();
 		fmif = getFrontMasterInstance(addr, port);
 		this.serverType = serverType;
+		this.addr = addr;
+		this.port = port;
 		
 		if (serverType == Server.BROWSESERVER) {
 			timeout = 1000;
@@ -72,6 +77,34 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 		}
 	}
 	
+	public synchronized void dropQueue() {
+		while (requestQueue.size() > 0) {
+			RequestPacket rp = requestQueue.get(0);
+			System.out.println("Ready to drop " + requestQueue.size() + " request");
+			if (rp.uid == 1) {
+				try {
+					this.fmif._dropReq(rp.r);
+					System.out.println("Ready to drop FrontMaster's request");
+				} catch (RemoteException e) {
+					// TODO Auto-generated catch block
+					System.out.println("Drop failed");
+					e.printStackTrace();
+				}
+			} else {
+				FrontServerIf fServer = getFrontServerInstance(addr, port, rp.uid);
+				try {
+					fServer._dropReq(rp.r);
+					System.out.println("Ready to drop " + rp.uid + "'s request");
+				} catch (RemoteException e) {
+					// TODO Auto-generated catch block
+					System.out.println("Drop failed");
+					e.printStackTrace();
+				}
+			}
+			requestQueue.remove(0);
+		}
+	}
+	
 	/*
 	 * Decide to scale out or scale in
 	 */
@@ -79,6 +112,7 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 		System.out.println("Request size: " + requestQueue.size());
 		if (toScaleOut()) {
 			startBServer();
+			dropQueue();
 		}
 		if (toScaleIn()) {
 			shutBServer();
@@ -91,9 +125,9 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 	public boolean toScaleOut() {
 		int tryScale = 2;
 		while (tryScale-- > 0) {
-			if (requestQueue.size() > scaleOutThreshold * (BServerList.size() + 1)) {
+			if (requestQueue.size() >= scaleOutThreshold * (BServerList.size() + 1)) {
 				try {
-					Thread.sleep(300);
+					Thread.sleep(50);
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
@@ -114,9 +148,9 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 		
 		int tryScale = 3;
 		while (tryScale-- > 0) {
-			if (requestQueue.size() < scaleInThreshold * (BServerList.size() + 1)) {
+			if (requestQueue.size() == 0) {//< scaleInThreshold * (BServerList.size() + 1)) {
 				try {
-					Thread.sleep(300);
+					Thread.sleep(2500);
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
@@ -163,7 +197,7 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 	 */
 	public synchronized Cloud.FrontEndOps.Request getRequest() {
 		if (requestQueue.size() > 0) {
-			return requestQueue.poll();
+			return requestQueue.poll().r;
 		}
 		return  null;
 	}
@@ -174,7 +208,7 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 	@Override
 	public synchronized Cloud.FrontEndOps.Request _getRequest() throws RemoteException {
 		if (requestQueue.size() > 0) {
-			return requestQueue.poll();
+			return requestQueue.poll().r;
 		}
 		return  null;
 	}
@@ -183,8 +217,8 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 	 * RMI call to get request from front server and add it to queue
 	 */
 	@Override
-	public synchronized void _sendRequest(Cloud.FrontEndOps.Request r) throws RemoteException {
-		requestQueue.add(r);
+	public synchronized void _sendRequest(RequestPacket rp) throws RemoteException {
+		requestQueue.add(rp);
 	}
 
 	/*
@@ -233,6 +267,22 @@ class BMaster extends UnicastRemoteObject implements BMasterIf {
 	    String url = String.format("//%s:%d/ServerService", addr, port);
 	    try {
 	      return (FrontMasterIf) Naming.lookup(url);
+	    } catch (MalformedURLException e) {
+	      //you probably want to do logging more properly
+	      System.err.println("Bad URL" + e);
+	    } catch (RemoteException e) {
+	      System.err.println("Remote connection refused to url "+ url + " " + e);
+	    } catch (NotBoundException e) {
+	      System.err.println("Not bound " + e);
+	    }
+	    return null;
+  	}
+	
+	// Get front master instance
+	public FrontServerIf getFrontServerInstance(String addr, int port, int id) {
+	    String url = String.format("//%s:%d/%d", addr, port, id);
+	    try {
+	      return (FrontServerIf) Naming.lookup(url);
 	    } catch (MalformedURLException e) {
 	      //you probably want to do logging more properly
 	      System.err.println("Bad URL" + e);

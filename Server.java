@@ -74,7 +74,14 @@ public class Server {
         } else {
         	// ask for role
         	FrontMasterIf master = getServerInstance(cAddr, port);
-        	ServerRole role = master._getRoleUID();
+        	ServerRole role = null;
+        	while (role == null) {
+	        	try {
+	        		role = master._getRoleUID();
+	        	} catch (RemoteException e) {
+	        		Thread.sleep(200);
+	        	}
+        	}
         	if (role.type == FRONTSERVER) { // This means a front server
         		System.out.println("Is Front Server with uid " + role.uid);
         		FrontServer fs = new FrontServer(SL, cAddr, port);

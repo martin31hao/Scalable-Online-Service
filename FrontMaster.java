@@ -70,7 +70,8 @@ public class FrontMaster extends UnicastRemoteObject implements FrontMasterIf{
             	}
             	// send requests to PM
             	try {
-					PM._sendRequest(r);
+            		RequestPacket rp = new RequestPacket(1, r);
+					PM._sendRequest(rp);
 				} catch (RemoteException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
@@ -84,7 +85,8 @@ public class FrontMaster extends UnicastRemoteObject implements FrontMasterIf{
             	}
             	// send requests to PM
             	try {
-					BM._sendRequest(r);
+            		RequestPacket rp = new RequestPacket(1, r);
+					BM._sendRequest(rp);
 				} catch (RemoteException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
@@ -208,20 +210,26 @@ public class FrontMaster extends UnicastRemoteObject implements FrontMasterIf{
 			while ((BM = getBMInstance(addr, port, serverType)) == null) {
 				// keep waiting for PM to get alive, inquire every 500ms
 				try {
-					Thread.sleep(200);
+					Thread.sleep(100);
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
+				}
+				while (SL.getQueueLength() > 0) {
+					SL.dropHead();
 				}
 			}
 		} else {
 			while ((PM = getBMInstance(addr, port, serverType)) == null) {
 				// keep waiting for PM to get alive, inquire every 500ms
 				try {
-					Thread.sleep(200);
+					Thread.sleep(100);
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
+				}
+				while (SL.getQueueLength() > 0) {
+					SL.dropHead();
 				}
 			}
 		}
@@ -277,5 +285,12 @@ public class FrontMaster extends UnicastRemoteObject implements FrontMasterIf{
 			}
 		}
 		
+	}
+
+	@Override
+	public void _dropReq(Cloud.FrontEndOps.Request r) throws RemoteException {
+		// TODO Auto-generated method stub
+		System.out.println("Drop a request from front master");
+		SL.drop(r);
 	}
 }

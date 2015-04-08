@@ -37,23 +37,11 @@ public class Server {
     		} catch (MalformedURLException e) {
     			System.err.println(e); //you probably want to do some decent logging here
     		}
-
+    		
             SL.startVM(); // start BM
+            Thread.sleep(1500);
             SL.startVM(); // start PM
     		
-            fm.run();
-        } else if (isPrimaryServer(SL, args[0], port, "PMaster")) {
-            System.out.println("Is P master");
-            BMaster fm = new BMaster(SL, cAddr, port, PURCHASESERVER);
-            
-            try {
-    			Naming.rebind(String.format("//%s:%d/PMService", cAddr, port), fm);
-    		} catch (RemoteException e) {
-    			System.err.println(e); //you probably want to do some decent logging here
-    		} catch (MalformedURLException e) {
-    			System.err.println(e); //you probably want to do some decent logging here
-    		}
-            
             fm.run();
         } else if (isPrimaryServer(SL, args[0], port, "BMaster")) {
         	System.out.println("Is B master");
@@ -71,6 +59,19 @@ public class Server {
     		}
         
         	fm.run();
+        } else if (isPrimaryServer(SL, args[0], port, "PMaster")) {
+            System.out.println("Is P master");
+            BMaster fm = new BMaster(SL, cAddr, port, PURCHASESERVER);
+            
+            try {
+    			Naming.rebind(String.format("//%s:%d/PMService", cAddr, port), fm);
+    		} catch (RemoteException e) {
+    			System.err.println(e); //you probably want to do some decent logging here
+    		} catch (MalformedURLException e) {
+    			System.err.println(e); //you probably want to do some decent logging here
+    		}
+            
+            fm.run();
         } else {
         	// ask for role
         	FrontMasterIf master = getServerInstance(cAddr, port);

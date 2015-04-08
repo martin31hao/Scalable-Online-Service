@@ -287,10 +287,10 @@ public class FrontMaster extends UnicastRemoteObject implements FrontMasterIf{
 		
 	}
 
-	@Override
+	/*@Override
 	public void _dropReq(Cloud.FrontEndOps.Request r) throws RemoteException {
 		// TODO Auto-generated method stub
 		System.out.println("Drop a request from front master");
 		SL.drop(r);
-	}
+	}*/
 }

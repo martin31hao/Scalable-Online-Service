@@ -47,12 +47,12 @@ public class FrontServer extends UnicastRemoteObject implements FrontServerIf {
         	Cloud.FrontEndOps.Request nowReq = SL.getNextRequest();
         	
         	if (nowReq == null) {
-				try {
+				/*try {
 					Thread.sleep(500);
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
-				}
+				}*/
 				continue;
 			}
         	
@@ -140,10 +140,10 @@ public class FrontServer extends UnicastRemoteObject implements FrontServerIf {
 	    return null;
 	}
 
-	@Override
+	/*@Override
 	public void _dropReq(Cloud.FrontEndOps.Request r) throws RemoteException {
 		// TODO Auto-generated method stub
 		System.out.println("Drop a request from server");
 		SL.drop(r);
-	}
+	}*/
 }

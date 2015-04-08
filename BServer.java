@@ -75,17 +75,17 @@ public class BServer extends UnicastRemoteObject implements BServerIf{
 				//e.printStackTrace();
 			}
 			if (nowReq == null) {
-				System.out.println("VM " + uid + " get null request.");
-				try {
+			//	System.out.println("VM " + uid + " get null request.");
+				/*try {
 					Thread.sleep(2000);
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
-				}
+				}*/
 				continue;
 			}
 				
-			System.out.println("VM " + uid + " starting process.");
+			//System.out.println("VM " + uid + " starting process.");
 			SL.processRequest(nowReq);
 		}
 		System.out.println("VM " + uid + " Killed");

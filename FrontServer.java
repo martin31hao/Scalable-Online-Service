@@ -9,8 +9,9 @@ import java.rmi.server.UnicastRemoteObject;
 /*
  * FrontServer:
  * Front server does the following things:
- * 		1. Send P/B request to PM or BM
- * 		2. Receive kill signal from FM, and be ready to kill after all requests have been sent 
+ * 		1. Send requests to front master
+ * 		2. Check if in a consecutive time there is no incoming requests, then
+ * 		   send kill request to front master, then kill itself 
  * 	
  */
 public class FrontServer extends UnicastRemoteObject implements FrontServerIf {
@@ -21,57 +22,59 @@ public class FrontServer extends UnicastRemoteObject implements FrontServerIf {
 
 	private ServerLib SL;
 	
-	//private int port = 0;
-	
-	private BMasterIf BM = null;
-	private BMasterIf PM = null;
+	private FrontMasterIf FM = null;
 	
 	private boolean toKill = false;
 	
+	private int uid;
+	
 	// BMaster which should be sent request to
-	public FrontServer(ServerLib SL, String addr, int port) throws RemoteException {
+	public FrontServer(ServerLib SL, String addr, int port, int id) 
+			throws RemoteException {
 		this.SL = SL;
-		//this.port = port;
-		BM = getBMasterInstance(addr, port, Server.BROWSESERVER);
-		PM = getBMasterInstance(addr, port, Server.PURCHASESERVER);
+		FM = getFrontMasterInstance(addr, port);
+		// register with load balancer so requests are sent to this server
+		SL.register_frontend();
+		uid = id;
 	}
 	
 	/*
-	 * Get request from its queue and keep sending to corresponding app server
+	 * Get request from its queue and keep sending to Front Master
 	 */
 	public void run() {
-		// register with load balancer so requests are sent to this server
-        SL.register_frontend();
-        
-        while (toKill == false) {
+        long lastReqTime = System.currentTimeMillis();
+        while (true) {
         	Cloud.FrontEndOps.Request nowReq = SL.getNextRequest();
         	
         	if (nowReq == null) {
-				/*try {
-					Thread.sleep(500);
-				} catch (InterruptedException e) {
-					// TODO Auto-generated catch block
-					e.printStackTrace();
-				}*/
+        		/*
+        		 *  If the server cannot get request in consecutive 2 sec, 
+        		 *  then try to kill itself
+        		 */
+        		if (System.currentTimeMillis() - lastReqTime > 2000) {
+					try {
+						if (FM._scaleInFront(uid)) {
+							SL.unregister_frontend();
+							break;
+						} else {
+							lastReqTime = System.currentTimeMillis(); 
+						}
+					} catch (RemoteException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
+				}
 				continue;
 			}
         	
-        	if (nowReq.isPurchase) {
-        		try {
-        			RequestPacket rp = new RequestPacket(1, nowReq);
-    				PM._sendRequest(rp);
-    			} catch (RemoteException e1) {
-    				e1.printStackTrace();
-    			}
-        	} else {
-        		try {
-        			RequestPacket rp = new RequestPacket(1, nowReq);
-    				BM._sendRequest(rp);
-    			} catch (RemoteException e1) {
-    				e1.printStackTrace();
-    			}       		
-        	}
-    		
+    		try {
+    			// Continue to send requests to front master
+    			lastReqTime = System.currentTimeMillis();
+    			FM._sendRequest(new RequestPacket(nowReq));
+				
+			} catch (RemoteException e1) {
+				e1.printStackTrace();
+			}
         }
         
         Cloud.FrontEndOps.Request nowReq = null;
@@ -84,13 +87,13 @@ public class FrontServer extends UnicastRemoteObject implements FrontServerIf {
         try {
 			UnicastRemoteObject.unexportObject(this, true);
 		} catch (NoSuchObjectException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
         SL.shutDown();
 	}
 	
 	/*
+	 * Deprecated:
 	 * RMI call for Front Master to kill it
 	 * 1. unregister from cloud first
 	 * 2. send remaining request from queue
@@ -99,12 +102,12 @@ public class FrontServer extends UnicastRemoteObject implements FrontServerIf {
 	@Override
 	public void _kill() throws RemoteException{
 		// Get unregistered from Cloud first
-		SL.unregister_frontend();
-	
 	 	toKill = true;
 	}
 	
-	// Get front master instance
+	/*
+	 *  Get front master instance
+	 */
 	public FrontMasterIf getFrontMasterInstance(String addr, int port) {
 	    String url = String.format("//%s:%d/ServerService", addr, port);
 	    try {
@@ -119,31 +122,4 @@ public class FrontServer extends UnicastRemoteObject implements FrontServerIf {
 	    }
 	    return null;
   	}
-	
-	// Get B Master remote instance
-	public BMasterIf getBMasterInstance(String addr, int port, int serverType) {
-		String url = null;
-		if (serverType == Server.BROWSESERVER)
-			url = String.format("//%s:%d/BMService", addr, port);
-		else
-			url = String.format("//%s:%d/PMService", addr, port);
-	    try {
-	      return (BMasterIf) Naming.lookup(url);
-	    } catch (MalformedURLException e) {
-	      //you probably want to do logging more properly
-	      System.err.println("Bad URL" + e);
-	    } catch (RemoteException e) {
-	      System.err.println("Remote connection refused to url "+ url + " " + e);
-	    } catch (NotBoundException e) {
-	      System.err.println("Not bound " + e);
-	    }
-	    return null;
-	}
-
-	/*@Override
-	public void _dropReq(Cloud.FrontEndOps.Request r) throws RemoteException {
-		// TODO Auto-generated method stub
-		System.out.println("Drop a request from server");
-		SL.drop(r);
-	}*/
 }

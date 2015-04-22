@@ -11,14 +11,26 @@ import java.rmi.registry.Registry;
 
 public class Server {
 	public static final int FRONTSERVER = 0;
-	public static final int BROWSESERVER = 1;
-	public static final int PURCHASESERVER = 2;
-    // Number of max waiting client to drop client from queue
-    //private final int maxWaitingClient = 10;
+	public static final int APPSERVER = 1;
 	private static String cAddr = null;
+	
+	// heuristic number to start app server when front master starts up 
+	private static int appServer[] = {
+		1, 1, 1, 1, 1, 1, 1, 1,
+		1, 2, 2, 2, 2, 2, 2, 2,
+		2, 2, 4, 2, 5, 3, 1, 1
+	};
+	
+	// heuristic number to start frontier server when front master starts up
+	private static int frontServer[] = {
+		0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 0, 0, 0, 0, 0, 0,
+		0, 0, 1, 0, 1, 1, 0, 0,
+	};
      
     public static void main ( String args[] ) throws Exception {
-        if (args.length != 2) throw new Exception("Need 2 args: <cloud_ip> <cloud_port>");
+        if (args.length != 2) throw new Exception("Need 2 args:"
+        		+ " <cloud_ip> <cloud_port>");
         ServerLib SL = new ServerLib( args[0], Integer.parseInt(args[1]) );
         cAddr = args[0];
         int port = Integer.parseInt(args[1]);
@@ -30,47 +42,45 @@ public class Server {
     		fm = new FrontMaster(SL, cAddr, port);
     			
     		try {
-    			Naming.rebind(String.format("//%s:%d/ServerService", cAddr, port), fm);
+    			Naming.rebind(String.format("//%s:%d/ServerService",
+    					cAddr, port), fm);
     			System.out.println("Bind Front Master successful!");
     		} catch (RemoteException e) {
-    			System.err.println(e); //you probably want to do some decent logging here
+    			System.err.println(e); 
     		} catch (MalformedURLException e) {
-    			System.err.println(e); //you probably want to do some decent logging here
+    			System.err.println(e); 
     		}
     		
-            SL.startVM(); // start BM
-            Thread.sleep(1500);
-            SL.startVM(); // start PM
+    		// Bind cache service in Front master
+    		Cache cache = new Cache(SL.getDB());
+			
+			try {
+				Naming.rebind(String.format("//%s:%d/CacheService",
+						cAddr, port), cache);
+			} catch (RemoteException e) {
+				System.err.println(e); 
+			} catch (MalformedURLException e) {
+				System.err.println(e); 
+			}
     		
-            fm.run();
-        } else if (isPrimaryServer(SL, args[0], port, "BMaster")) {
-        	System.out.println("Is B master");
-    		
-        	BMaster fm = null;
-        	
-    		fm = new BMaster(SL, cAddr, port, BROWSESERVER);
-    			
-    		try {
-    			Naming.rebind(String.format("//%s:%d/BMService", cAddr, port), fm);
-    		} catch (RemoteException e) {
-    			System.err.println(e); //you probably want to do some decent logging here
-    		} catch (MalformedURLException e) {
-    			System.err.println(e); //you probably want to do some decent logging here
-    		}
-        
-        	fm.run();
-        } else if (isPrimaryServer(SL, args[0], port, "PMaster")) {
-            System.out.println("Is P master");
-            BMaster fm = new BMaster(SL, cAddr, port, PURCHASESERVER);
+			int hour = (int)SL.getTime();
+            for (int i = 0; i < appServer[hour]; i++) {
+            	SL.startVM(); // start another BServer
+                try {
+    				fm._addServer(APPSERVER);
+    			} catch (RemoteException e) {
+    				e.printStackTrace();
+    			}
+            }
             
-            try {
-    			Naming.rebind(String.format("//%s:%d/PMService", cAddr, port), fm);
-    		} catch (RemoteException e) {
-    			System.err.println(e); //you probably want to do some decent logging here
-    		} catch (MalformedURLException e) {
-    			System.err.println(e); //you probably want to do some decent logging here
-    		}
-            
+            for (int i = 0; i < frontServer[hour]; i++) {
+	            SL.startVM(); // start another BServer
+	            try {
+					fm._addServer(FRONTSERVER);
+				} catch (RemoteException e) {
+					e.printStackTrace();
+				}
+            }
             fm.run();
         } else {
         	// ask for role
@@ -78,45 +88,36 @@ public class Server {
         	ServerRole role = null;
         	while (role == null) {
 	        	try {
+	        		// Get its role as well as uid from front master
 	        		role = master._getRoleUID();
 	        	} catch (RemoteException e) {
-	        		Thread.sleep(200);
+	        		Thread.sleep(50);
 	        	}
         	}
         	if (role.type == FRONTSERVER) { // This means a front server
         		System.out.println("Is Front Server with uid " + role.uid);
-        		FrontServer fs = new FrontServer(SL, cAddr, port);
+        		FrontServer fs = new FrontServer(SL, cAddr, port, role.uid);
         		// register itself to registry
         		try {
-        			Naming.rebind(String.format("//%s:%d/%d", cAddr, port, role.uid), fs);
+        			Naming.rebind(String.format("//%s:%d/%d", 
+        					cAddr, port, role.uid), fs);
         		} catch (RemoteException e) {
-        			System.err.println(e); //you probably want to do some decent logging here
+        			System.err.println(e); 
         		} catch (MalformedURLException e) {
-        			System.err.println(e); //you probably want to do some decent logging here
+        			System.err.println(e); 
         		}
         		fs.run();
-        	} else if (role.type == PURCHASESERVER) { // This means a purchase server
-        		System.out.println("Is Purchase Server with uid " + role.uid);
+        	} else { // This means an app server
+        		System.out.println("Is App Server with uid " + role.uid);
         		BServer bs = new BServer(SL, cAddr, port, role.uid, role.type);
         		// register itself to registry
         		try {
-        			Naming.rebind(String.format("//%s:%d/%d", cAddr, port, role.uid), bs);
+        			Naming.rebind(String.format("//%s:%d/%d", 
+        					cAddr, port, role.uid), bs);
         		} catch (RemoteException e) {
-        			System.err.println(e); //you probably want to do some decent logging here
+        			System.err.println(e); 
         		} catch (MalformedURLException e) {
-        			System.err.println(e); //you probably want to do some decent logging here
-        		}
-        		bs.run();
-        	} else { // This means a browse server
-        		System.out.println("Is Browse Server with uid " + role.uid);
-        		BServer bs = new BServer(SL, cAddr, port, role.uid, role.type);
-        		// register itself to registry
-        		try {
-        			Naming.rebind(String.format("//%s:%d/%d", cAddr, port, role.uid), bs);
-        		} catch (RemoteException e) {
-        			System.err.println(e); //you probably want to do some decent logging here
-        		} catch (MalformedURLException e) {
-        			System.err.println(e); //you probably want to do some decent logging here
+        			System.err.println(e); 
         		}
         		bs.run();
         	}
@@ -125,7 +126,7 @@ public class Server {
     }
     
     /*
-     * Check whether the server is the primary server
+     * Check whether the server is the front master server
      * If so, it can assign new server and delete over-assigned server
      */
     public static boolean isPrimaryServer(ServerLib sl,
@@ -161,7 +162,9 @@ public class Server {
         }
     }
     
-    
+    /*
+     *  Get front master instance
+     */
     public static FrontMasterIf getServerInstance(String addr, int port) {
 	    String url = String.format("//%s:%d/ServerService", addr, port);
 	    try {
@@ -170,7 +173,8 @@ public class Server {
 	      //you probably want to do logging more properly
 	      System.err.println("Bad URL" + e);
 	    } catch (RemoteException e) {
-	      System.err.println("Remote connection refused to url "+ url + " " + e);
+	      System.err.println("Remote connection refused to url "+ 
+	    		  url + " " + e);
 	    } catch (NotBoundException e) {
 	      System.err.println("Not bound " + e);
 	    }

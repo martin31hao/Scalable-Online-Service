@@ -4,13 +4,14 @@ import java.rmi.NoSuchObjectException;
 import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.server.UnicastRemoteObject;
+import java.util.LinkedList;
 
 
 /*
  * BServer:
- * Browse Server does the following things:
- * 		1. Pull request from BMServer, async pull another request when doing a request if possible
- * 		2. Receive kill signal from BMServer, clear now running request and stop
+ * App Server does the following things:
+ * 		1. Pull request from Front master
+ * 		2. Kill itself by RMI, if receive yes from server, then scale in
  * 	
  */
 public class BServer extends UnicastRemoteObject implements BServerIf{
@@ -21,78 +22,104 @@ public class BServer extends UnicastRemoteObject implements BServerIf{
 
 	private ServerLib SL;
 	
-	private Cloud.FrontEndOps.Request nowReq = null;
-	private Cloud.FrontEndOps.Request nextReq = null;
+	private RequestPacket nowReq = null;
 	
 	private boolean toKill = false;
 	
-	// Remote Masters
-	private BMasterIf BM = null;
+	private FrontMasterIf FM = null;
 	
-	private int serverType;
-	
-	private String addr;
-	private int port;
 	private int uid;
+	
+	private Cloud.DatabaseOps cache = null;
 	
 	public BServer(ServerLib SL, String addr, int port, int id, int serverType)
 		throws RemoteException {
 		this.SL = SL;
-		this.serverType = serverType;
-		this.addr = addr;
-		this.port = port;
 		this.uid = id;
+		cache = getCacheInstance(addr, port);
+		FM = getFMInstance(addr, port);
+		this.nowReq = null;
 	}
 	
 	/*
-	 * 
+	 * The main thread to pull new requests from front master 
 	 */
 	public void run() {
-		BM = getBMInstance(addr, port);
-		String regName = Integer.toString(uid);
-		System.out.println("VM " + uid + " Running");
-		try {
-			// Get it registered to BMaster
-			BM._getBServer(regName, addr, port);
-		} catch (RemoteException e) {
-			// TODO Auto-generated catch block
-			e.printStackTrace();
-		}
+		
 		System.out.println("VM " + uid + " Register success");
+		Integer UID = new Integer(uid);
+		
+		/*
+		 *  A list containing consecutive 5 waiting time to get a new request,
+		 *  which is used to decide whether scale in itself
+		 */
+		LinkedList<Long> waitTime = new LinkedList<Long>();
+		long totalWaitTime = 0;
+		int cnt = 5;
+		
 		while (toKill == false) {
 			try {
-				nowReq = BM._getRequest();
+				nowReq = FM._appAvailable(UID);
 			} catch (RemoteException e) {
 				// TODO Auto-generated catch block
-				try {
-					Thread.sleep(50);
-				} catch (InterruptedException e1) {
-					// TODO Auto-generated catch block
-					e1.printStackTrace();
-				}
-				//System.out.println("VM " + uid + " get request failed.");
-				continue;
-				//e.printStackTrace();
+				e.printStackTrace();
 			}
-			if (nowReq == null) {
-			//	System.out.println("VM " + uid + " get null request.");
-				/*try {
-					Thread.sleep(2000);
+			if (this.nowReq != null) {
+				
+				long curTime = System.currentTimeMillis();
+				if (waitTime.size() < cnt) {
+					waitTime.add(curTime);
+				} else {
+					for (int i = 1; i < cnt; i++) {
+						totalWaitTime = waitTime.get(i) - waitTime.get(i-1);
+					}
+					totalWaitTime += curTime - waitTime.get(cnt-1);
+					waitTime.removeFirst();
+					waitTime.addLast(curTime);
+					// If 5 consecutive waiting time exceeds 3000ms, then try scale in
+					if (totalWaitTime > 3000) { 
+						try {
+							if (FM._scaleInApp(uid)) {
+								break;
+							} else {
+								waitTime.clear();
+							}
+						} catch (RemoteException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+						}
+					}
+				}
+
+				if (nowReq.r.isPurchase) {
+					// If the purchase request has been issued more than 1400ms, drop it 
+					if (curTime - nowReq.getTime > 1400) {
+						SL.drop(nowReq.r);
+					} else {
+						SL.processRequest(nowReq.r, cache);
+					}
+				} else {
+					// If the browse request has been issued more than 400ms, drop it
+					if (curTime - nowReq.getTime > 400) {
+						SL.drop(nowReq.r);
+					} else {
+						SL.processRequest(nowReq.r, cache);
+					}
+				}
+				
+			} else {
+				try {
+					Thread.sleep(1);
 				} catch (InterruptedException e) {
 					// TODO Auto-generated catch block
 					e.printStackTrace();
-				}*/
-				continue;
+				}
 			}
-				
-			//System.out.println("VM " + uid + " starting process.");
-			SL.processRequest(nowReq);
 		}
 		System.out.println("VM " + uid + " Killed");
 		try {
 			UnicastRemoteObject.unexportObject(this, true);
 		} catch (NoSuchObjectException e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 		SL.shutDown();
@@ -106,15 +133,14 @@ public class BServer extends UnicastRemoteObject implements BServerIf{
 		toKill = true;
 	}
 	
-	public BMasterIf getBMInstance(String addr, int port) {
+	/*
+	 * Get front master instance 
+	 */
+	public FrontMasterIf getFMInstance(String addr, int port) {
 		String url = null;
-		if (serverType == Server.BROWSESERVER)
-			url = String.format("//%s:%d/BMService", addr, port);
-		else {
-			url = String.format("//%s:%d/PMService", addr, port);
-		}
+		url = String.format("//%s:%d/ServerService", addr, port);
 	    try {
-	      return (BMasterIf) Naming.lookup(url);
+	      return (FrontMasterIf) Naming.lookup(url);
 	    } catch (MalformedURLException e) {
 	      //you probably want to do logging more properly
 	      System.err.println("Bad URL" + e);
@@ -125,4 +151,23 @@ public class BServer extends UnicastRemoteObject implements BServerIf{
 	    }
 	    return null;
   	}
+	
+	/*
+	 *  Get cache instance
+	 */
+	public Cloud.DatabaseOps getCacheInstance(String addr, int port) {
+	    String url = String.format("//%s:%d/CacheService", addr, port);
+	    try {
+	      return (Cloud.DatabaseOps) Naming.lookup(url);
+	    } catch (MalformedURLException e) {
+	      //you probably want to do logging more properly
+	      System.err.println("Bad URL" + e);
+	    } catch (RemoteException e) {
+	      System.err.println("Remote connection refused to url "+ url + " " + e);
+	    } catch (NotBoundException e) {
+	      System.err.println("Not bound " + e);
+	    }
+	    return null;
+  	}
+	
 }
